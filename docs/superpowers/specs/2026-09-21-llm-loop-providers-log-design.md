@@ -19,7 +19,12 @@ management beyond reading an API key from an environment variable.
 
 ## Background
 
-Full concept: [`../../../../ideas/emacs-code-mode-agent-idea.md`](../../../../ideas/emacs-code-mode-agent-idea.md).
+Full concept (see the repo README): a headless Emacs process is the
+agent's entire body, and because Elisp is homoiconic and Emacs is fully
+introspectable at runtime, there's no boundary between "calling a tool,"
+"adding a new tool," and "rewriting the agent's own control loop" — all
+three are just `eval`.
+
 Proven so far (`spike.sh`, first commit): a headless Emacs daemon reliably
 round-trips `emacsclient --eval`, including redefining its own functions and
 writing/loading `.el` files from disk. Nothing here changes that mechanism —
