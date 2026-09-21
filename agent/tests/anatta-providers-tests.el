@@ -43,3 +43,31 @@
   (let ((response "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"(+ 1 2)\"}}]}"))
     (should (equal (funcall (plist-get anatta-provider-openai :parse-response) response)
                     "(+ 1 2)"))))
+
+(ert-deftest anatta-curl-args-uses-data-file-not-argv-body ()
+  (let ((args (anatta-curl-args "https://example.com"
+                                 (list (cons "x-api-key" "sk-test"))
+                                 "/tmp/some-body-file")))
+    (should (member "--data-binary" args))
+    (should (member "@/tmp/some-body-file" args))
+    (should (member "-H" args))
+    (should (member "x-api-key: sk-test" args))))
+
+(ert-deftest anatta-http-post-round-trips-via-real-curl ()
+  ;; No network: post to a local file:// isn't supported by curl for POST,
+  ;; so this checks curl actually runs and a nonexistent host fails cleanly.
+  (should-error (anatta-http-post "http://127.0.0.1:1" nil "{}")))
+
+(ert-deftest anatta-provider-request-surfaces-http-failure-as-error-cons ()
+  (let ((anatta-active-provider anatta-provider-anthropic))
+    (cl-letf (((symbol-function 'anatta-http-post)
+               (lambda (&rest _) (error "curl exited 7: connection refused"))))
+      (let ((result (anatta-provider-request nil "sys")))
+        (should (consp result))
+        (should (eq (car result) :error))))))
+
+(ert-deftest anatta-provider-request-returns-text-on-success ()
+  (let ((anatta-active-provider anatta-provider-anthropic))
+    (cl-letf (((symbol-function 'anatta-http-post)
+               (lambda (&rest _) "{\"content\":[{\"type\":\"text\",\"text\":\"(+ 1 2)\"}]}")))
+      (should (equal (anatta-provider-request nil "sys") "(+ 1 2)")))))

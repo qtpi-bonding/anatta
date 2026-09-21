@@ -2,6 +2,7 @@
 ;;; anatta-providers.el --- LLM provider plists -*- lexical-binding: t; -*-
 
 (require 'json)
+(require 'anatta-log)
 
 (defun anatta--messages-to-json-array (messages)
   "Convert MESSAGES (list of (:role STRING :content STRING) plists) into
@@ -63,5 +64,43 @@ a vector of alists suitable for `json-encode'."
 
 (defvar anatta-active-provider anatta-provider-anthropic
   "The provider plist currently in effect. `setq' to switch providers.")
+
+(defun anatta-curl-args (url headers tmpfile)
+  "Build the curl argv (excluding the \"curl\" program name itself) to
+POST TMPFILE's contents to URL with HEADERS (an alist)."
+  (append (list "-s" "-X" "POST" url "--data-binary" (format "@%s" tmpfile))
+          (mapcan (lambda (h) (list "-H" (format "%s: %s" (car h) (cdr h))))
+                  headers)))
+
+(defun anatta-http-post (url headers body)
+  "POST BODY to URL with HEADERS via curl, writing BODY to a temp file
+first (never as a literal argv string). Returns the response body
+string, or signals an error if curl exits non-zero."
+  (let ((tmpfile (make-temp-file "anatta-req")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmpfile (insert body))
+          (with-temp-buffer
+            (let ((status (apply #'call-process "curl" nil t nil
+                                  (anatta-curl-args url headers tmpfile))))
+              (if (zerop status)
+                  (buffer-string)
+                (error "curl exited %d: %s" status (buffer-string))))))
+      (delete-file tmpfile))))
+
+(defun anatta-provider-request (log system-prompt)
+  "Call `anatta-active-provider' with LOG and SYSTEM-PROMPT. Returns the
+raw assistant text on success, or a (:error . MESSAGE) cons on any
+network/HTTP/parse failure."
+  (condition-case err
+      (let* ((provider anatta-active-provider)
+             (messages (anatta-log-to-provider-messages log))
+             (body (funcall (plist-get provider :build-request)
+                             messages system-prompt provider))
+             (headers (funcall (plist-get provider :headers-fn)
+                                (getenv (plist-get provider :api-key-env))))
+             (response (anatta-http-post (plist-get provider :api-base) headers body)))
+        (funcall (plist-get provider :parse-response) response))
+    (error (cons :error (error-message-string err)))))
 
 (provide 'anatta-providers)

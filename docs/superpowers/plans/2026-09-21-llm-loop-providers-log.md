@@ -243,6 +243,7 @@ Expected: FAIL — `anatta-providers.el` doesn't exist yet.
 ;;; anatta-providers.el --- LLM provider plists -*- lexical-binding: t; -*-
 
 (require 'json)
+(require 'anatta-log)
 
 (defun anatta--messages-to-json-array (messages)
   "Convert MESSAGES (list of (:role STRING :content STRING) plists) into
