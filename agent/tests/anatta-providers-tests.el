@@ -71,3 +71,29 @@
     (cl-letf (((symbol-function 'anatta-http-post)
                (lambda (&rest _) "{\"content\":[{\"type\":\"text\",\"text\":\"(+ 1 2)\"}]}")))
       (should (equal (anatta-provider-request nil "sys") "(+ 1 2)")))))
+
+(ert-deftest anatta-openrouter-is-active-by-default ()
+  (should (eq anatta-active-provider anatta-provider-openrouter)))
+
+(ert-deftest anatta-openrouter-headers ()
+  ;; Same header shape as OpenAI's Bearer-token convention.
+  (let ((headers (funcall (plist-get anatta-provider-openrouter :headers-fn) "sk-or-test")))
+    (should (equal (cdr (assoc "Authorization" headers)) "Bearer sk-or-test"))
+    (should (equal (cdr (assoc "content-type" headers)) "application/json"))))
+
+(ert-deftest anatta-openrouter-build-request-shape ()
+  (let* ((messages (list (list :role "user" :content "hi")))
+         (body (funcall (plist-get anatta-provider-openrouter :build-request)
+                         messages "sys prompt" anatta-provider-openrouter))
+         (parsed (json-parse-string body :object-type 'alist))
+         (msgs (alist-get 'messages parsed)))
+    (should (equal (alist-get 'model parsed) (plist-get anatta-provider-openrouter :model)))
+    (should (equal (alist-get 'role (aref msgs 0)) "system"))
+    (should (equal (alist-get 'content (aref msgs 0)) "sys prompt"))
+    (should (equal (alist-get 'role (aref msgs 1)) "user"))
+    (should (equal (alist-get 'content (aref msgs 1)) "hi"))))
+
+(ert-deftest anatta-openrouter-parse-response-extracts-text ()
+  (let ((response "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"(+ 1 2)\"}}]}"))
+    (should (equal (funcall (plist-get anatta-provider-openrouter :parse-response) response)
+                    "(+ 1 2)"))))

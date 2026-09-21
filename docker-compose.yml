@@ -13,6 +13,7 @@ services:
     environment:
       - ANTHROPIC_API_KEY
       - OPENAI_API_KEY
+      - OPENROUTER_API_KEY
       - ANATTA_TASK
     # No published ports — the whole point is a self-modifying process
     # with no path back out to the host beyond this repo checkout.

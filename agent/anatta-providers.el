@@ -62,7 +62,20 @@ a vector of alists suitable for `json-encode'."
         :build-request #'anatta-openai-build-request
         :parse-response #'anatta-openai-parse-response))
 
-(defvar anatta-active-provider anatta-provider-anthropic
+(defvar anatta-provider-openrouter
+  (list :name "openrouter"
+        ;; OpenRouter's API is OpenAI-compatible (same chat/completions
+        ;; request/response shape, same Authorization: Bearer header), so
+        ;; this reuses anatta-openai-*'s functions unchanged rather than
+        ;; duplicating them.
+        :api-base "https://openrouter.ai/api/v1/chat/completions"
+        :api-key-env "OPENROUTER_API_KEY"
+        :model "anthropic/claude-sonnet-4.5"
+        :headers-fn #'anatta-openai-headers-fn
+        :build-request #'anatta-openai-build-request
+        :parse-response #'anatta-openai-parse-response))
+
+(defvar anatta-active-provider anatta-provider-openrouter
   "The provider plist currently in effect. `setq' to switch providers.")
 
 (defun anatta-curl-args (url headers tmpfile)

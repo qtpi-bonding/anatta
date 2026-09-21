@@ -20,7 +20,9 @@ Spike-stage plus a wired LLM loop. `spike.sh` confirms the core eval
 mechanism (see the first commit). `agent/anatta-log.el`,
 `agent/anatta-providers.el`, and `agent/anatta-loop.el` add a real
 provider-driven loop on top of it: the conversation log is native elisp
-data (not JSON), providers are swappable plists (Anthropic/OpenAI), and
+data (not JSON), providers are swappable plists (Anthropic, OpenAI,
+OpenRouter — active by default, since OpenRouter's API is OpenAI-compatible
+and its provider plist reuses the OpenAI functions directly), and
 the built-in capability surface is exactly two things — implicit eval
 of whatever elisp the model returns each turn, and `anatta-persist-to`
 for durably writing a new capability. Everything else is expected to be
@@ -37,7 +39,7 @@ Two ways to run it:
   `C-u 5 M-x anatta-run` to cap it at 5 steps) drives the loop directly —
   watch `anatta-log` grow, eval into it yourself, no container required.
 
-Run `ANTHROPIC_API_KEY=<key> ./smoke-test.sh` for one real,
+Run `OPENROUTER_API_KEY=<key> ./smoke-test.sh` for one real,
 manually-verified turn. Unit tests for each piece run without any
 network access — see `agent/tests/`.
 
