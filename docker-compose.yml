@@ -3,5 +3,9 @@ services:
     build: .
     volumes:
       - ./agent:/agent/src
+    environment:
+      - ANTHROPIC_API_KEY
+      - OPENAI_API_KEY
+      - ANATTA_TASK
     # No published ports, no host mounts beyond ./agent — the whole point
     # is a self-modifying process with no path back out to the host.

@@ -3,5 +3,11 @@ set -e
 
 emacs --daemon
 
-# Keep the container alive so `docker exec` / `emacsclient` can reach the daemon.
+emacsclient --eval "(progn
+  (add-to-list 'load-path \"/agent/src\")
+  (require 'anatta-log)
+  (require 'anatta-providers)
+  (require 'anatta-loop)
+  (anatta-log-load (getenv \"ANATTA_TASK\")))"
+
 tail -f /dev/null

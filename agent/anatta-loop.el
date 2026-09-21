@@ -91,8 +91,17 @@ outcome, including early-exit error paths."
 
 (defun anatta-run (&optional max-iter)
   "Call `anatta-step' in a loop until `anatta-done' is called or
-MAX-ITER steps have run (default 50)."
-  (let ((max-iter (or max-iter 50))
+MAX-ITER steps have run (default 50). Interactively, a numeric prefix
+argument sets MAX-ITER (e.g. `C-u 5 M-x anatta-run`); with no prefix,
+or when called from code with MAX-ITER omitted, it defaults to 50.
+This is the same function whether invoked via `emacsclient --eval' in
+a headless daemon or via `M-x' in a person's own Emacs — nothing here
+assumes a particular host, only that `anatta-agent-dir' points
+somewhere writable."
+  (interactive "P")
+  (let ((max-iter (cond ((integerp max-iter) max-iter)
+                         (max-iter (prefix-numeric-value max-iter))
+                         (t 50)))
         (n 0))
     (setq anatta-loop-done-p nil)
     (while (and (< n max-iter) (not anatta-loop-done-p))

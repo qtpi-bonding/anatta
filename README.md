@@ -16,18 +16,30 @@ can rewrite its own control loop can also break it.
 
 ## Status
 
-Spike-stage. `spike.sh` confirms the core feasibility question: does
-`emacsclient --eval` reliably round-trip code into a running headless
-daemon, including redefining functions and writing/loading `.el` files
-from disk? All four checks pass:
+Spike-stage plus a wired LLM loop. `spike.sh` confirms the core eval
+mechanism (see the first commit). `agent/anatta-log.el`,
+`agent/anatta-providers.el`, and `agent/anatta-loop.el` add a real
+provider-driven loop on top of it: the conversation log is native elisp
+data (not JSON), providers are swappable plists (Anthropic/OpenAI), and
+the built-in capability surface is exactly two things — implicit eval
+of whatever elisp the model returns each turn, and `anatta-persist-to`
+for durably writing a new capability. Everything else is expected to be
+elisp the agent writes for itself at runtime.
 
-- basic eval
-- `defun` + call a brand-new function
-- redefine an existing function (self-modification, no restart)
-- write a `.el` file from inside the container, `load` it, call it
-  (confirms the persistence path through the `./agent` bind mount)
+Two ways to run it:
 
-No LLM loop wired up yet.
+- **As a CLI:** `bin/anatta "<task>"` starts the containerized daemon if
+  needed, runs the task, prints the resulting log, exits. `smoke-test.sh`
+  is a thin wrapper around this for a one-shot manual real-provider check.
+- **Inside Emacs:** `(require 'anatta-loop)` in any running Emacs (headless
+  daemon or your own interactive session), `setq anatta-agent-dir` to
+  wherever you want the agent's workspace, then `M-x anatta-run` (or
+  `C-u 5 M-x anatta-run` to cap it at 5 steps) drives the loop directly —
+  watch `anatta-log` grow, eval into it yourself, no container required.
+
+Run `ANTHROPIC_API_KEY=<key> ./smoke-test.sh` for one real,
+manually-verified turn. Unit tests for each piece run without any
+network access — see `agent/tests/`.
 
 ## Running the spike
 

@@ -1,0 +1,28 @@
+#!/bin/sh
+# anatta CLI: run one task against the agent's headless Emacs daemon,
+# print the resulting log, then exit.
+#
+# Usage: bin/anatta "<task>"
+#   ANATTA_MAX_ITER=<n>  optional, defaults to 50 (anatta-run's own default)
+set -e
+
+if [ -z "$1" ]; then
+  echo "usage: $0 \"<task>\"" >&2
+  exit 1
+fi
+
+cd "$(dirname "$0")/.."
+
+export ANATTA_TASK="$1"
+max_iter="${ANATTA_MAX_ITER:-50}"
+
+docker compose build
+docker compose up -d
+
+echo "--- running (max $max_iter steps) ---"
+docker compose exec anatta emacsclient --eval "(anatta-run $max_iter)"
+
+echo "--- log ---"
+docker compose exec anatta emacsclient --eval '(pp-to-string anatta-log)'
+
+docker compose down
