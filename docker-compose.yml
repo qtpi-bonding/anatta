@@ -1,0 +1,7 @@
+services:
+  anatta:
+    build: .
+    volumes:
+      - ./agent:/agent/src
+    # No published ports, no host mounts beyond ./agent — the whole point
+    # is a self-modifying process with no path back out to the host.
