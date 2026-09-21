@@ -50,8 +50,9 @@ network access — see `agent/tests/`.
 ## Layout
 
 - `Dockerfile` / `entrypoint.sh` — headless Emacs daemon in a container.
-- `docker-compose.yml` — bind-mounts `./agent` into the container as the
-  agent's writable "genome" directory.
+- `docker-compose.yml` — bind-mounts the whole repo into the container at
+  `/repo` (not just `./agent`), so `agent/`'s git commits can see `.git`,
+  which lives at the repo root.
 - `spike.sh` — the feasibility check above.
 - `agent/` — where the agent's own `.el` files will live once it starts
   writing them.

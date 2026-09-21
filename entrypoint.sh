@@ -4,7 +4,8 @@ set -e
 emacs --daemon
 
 emacsclient --eval "(progn
-  (add-to-list 'load-path \"/agent/src\")
+  (add-to-list 'load-path \"/repo/agent\")
+  (setq anatta-agent-dir \"/repo/agent/\")
   (require 'anatta-log)
   (require 'anatta-providers)
   (require 'anatta-loop)

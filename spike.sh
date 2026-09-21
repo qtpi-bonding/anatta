@@ -20,6 +20,6 @@ docker compose exec anatta emacsclient --eval \
 
 echo "--- write a .el file from inside the image, load it back ---"
 docker compose exec anatta emacsclient --eval \
-  '(progn (with-temp-file "/agent/src/scratch.el" (insert "(defun anatta-from-disk () 42)")) (load "/agent/src/scratch.el") (anatta-from-disk))'
+  '(progn (with-temp-file "/repo/agent/scratch.el" (insert "(defun anatta-from-disk () 42)")) (load "/repo/agent/scratch.el") (anatta-from-disk))'
 
 docker compose down

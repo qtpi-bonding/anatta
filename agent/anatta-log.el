@@ -1,8 +1,12 @@
 ;; agent/anatta-log.el
 ;;; anatta-log.el --- the conversation log, as elisp data -*- lexical-binding: t; -*-
 
-(defvar anatta-agent-dir "/agent/src/"
-  "Directory holding agent-authored files and the persisted log.")
+(defvar anatta-agent-dir "/repo/agent/"
+  "Directory holding agent-authored files and the persisted log. Must be
+inside a git working tree (or a descendant of one) for
+`anatta-git-commit' to succeed — see docker-compose.yml's volume
+mount, which mounts the whole repo, not just this directory, so
+`.git' is reachable from here.")
 
 (defun anatta-git-commit (dir message files)
   "Run `git add FILES` then `git commit -m MESSAGE` inside DIR.
