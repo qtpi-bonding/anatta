@@ -128,7 +128,8 @@ plists, the provider-agnostic message shape every provider's
         (list :role "user"
               :content (if (plist-member entry :error)
                             (format "Eval error: %s" (plist-get entry :error))
-                          (format "Eval result: %s" (plist-get entry :value)))))))
+                          (format "Eval result: %s" (plist-get entry :value)))))
+       (role (error "anatta-log-to-provider-messages: unknown role %S" role))))
    log))
 
 (defun anatta-log-persist ()
@@ -559,6 +560,13 @@ git commit -m "feat: extract and read exactly one elisp form per model turn"
   (let* ((tmpdir (make-temp-file "anatta-persist-test" t))
          (anatta-agent-dir tmpdir))
     (call-process "git" nil nil nil "init" "-q" tmpdir)
+    ;; repo-local identity so `git commit` succeeds even in an environment
+    ;; with no global user.name/user.email configured (CI, a fresh
+    ;; container) — anatta-git-commit's failures are non-fatal and
+    ;; unchecked, so without this the commit below silently no-ops and
+    ;; the git-log assertion fails for an unrelated reason
+    (call-process "git" nil nil nil "-C" tmpdir "config" "user.email" "anatta-test@example.com")
+    (call-process "git" nil nil nil "-C" tmpdir "config" "user.name" "anatta-test")
     ;; sanity: the function this file defines shouldn't exist in the running
     ;; image yet, so calling it is the actual behavior under test
     (should (not (fboundp 'anatta-persisted-fn-under-test)))
@@ -644,7 +652,7 @@ from RESPONSES (a list), one per call, ignoring its arguments."
     (call-process "git" nil nil nil "init" "-q" tmpdir)
     (anatta-test--with-canned-responses (list "```elisp\n(+ 1 2)\n```")
       (anatta-step))
-    (should (= (length anatta-log) 3))  ; assistant + result (no seed user turn here)
+    (should (= (length anatta-log) 2))  ; assistant + result (no seed user turn here)
     (should (eq (plist-get (nth 0 anatta-log) :role) 'assistant))
     (should (equal (plist-get (nth 1 anatta-log) :value) "3"))))
 
@@ -695,9 +703,11 @@ from RESPONSES (a list), one per call, ignoring its arguments."
     (call-process "git" nil nil nil "init" "-q" tmpdir)
     (anatta-test--with-canned-responses
         (list "```elisp\n(+ 1 1)\n```" "```elisp\n(anatta-done)\n```" "```elisp\n(+ 9 9)\n```")
-      (anatta-run 10))
-    ;; third canned response should never be consumed
-    (should (= (length anatta-test--responses) 1))))
+      (anatta-run 10)
+      ;; third canned response should never be consumed — checked here,
+      ;; inside the macro's `let`, since `anatta-test--responses` isn't
+      ;; special and goes out of scope the moment the macro body ends
+      (should (= (length anatta-test--responses) 1)))))
 
 (ert-deftest anatta-run-stops-at-max-iter ()
   (let* ((tmpdir (make-temp-file "anatta-run-test" t))
