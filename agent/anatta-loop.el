@@ -28,4 +28,15 @@ dropped or silently evaluated as multiple forms."
           (cons :error "expected exactly one form, got extra trailing content")))
     (error (cons :error (error-message-string err)))))
 
+(defun anatta-persist-to (relative-path form-string)
+  "Write FORM-STRING to RELATIVE-PATH under `anatta-agent-dir', `load' it
+so it takes effect immediately, and git-commit it. This is the durable
+path, contrasted with plain eval which only affects the running image
+until the daemon restarts."
+  (let ((full-path (expand-file-name relative-path anatta-agent-dir)))
+    (with-temp-file full-path (insert form-string))
+    (load full-path)
+    (anatta-git-commit anatta-agent-dir (format "persist: %s" relative-path)
+                        (list relative-path))))
+
 (provide 'anatta-loop)
