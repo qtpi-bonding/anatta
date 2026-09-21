@@ -87,7 +87,11 @@ strings/plists.
    simpler and more predictable in a headless container: no proxy/cookie
    state, easy to pass the API key as a header without it touching Emacs's
    URL cache. The API key is read from the env var named in `:api-key-env`
-   at call time, never written into the log or persisted to disk.
+   at call time, never written into the log or persisted to disk. The JSON
+   body is written to a temp file first and sent via `curl --data-binary
+   @<tmpfile>`, **not** passed as a literal argv string — the log (and thus
+   the request body) grows every turn, and an argv-string body risks
+   hitting the OS's `ARG_MAX` well before the log gets large.
 4. Call `:parse-response` on the response body, producing the assistant's
    raw text.
 5. Return that text (a plain string) to the caller.
@@ -109,7 +113,13 @@ see Component 3's error handling for how the loop reacts.
 
 Functions:
 
-- `anatta-log-append(entry)` — push a plist onto `anatta-log`.
+- `anatta-log-append(entry)` — append `entry` to the **tail** of
+  `anatta-log` (e.g. `(setq anatta-log (append anatta-log (list entry)))`,
+  or maintain a separate reversed accumulator internally if append's O(n)
+  cost ever matters). This is called out explicitly because elisp's `push`
+  prepends — a literal "push a plist onto the log" reading would silently
+  produce newest-first ordering and corrupt
+  `anatta-log-to-provider-messages`'s output.
 - `anatta-log-to-provider-messages(log)` — map `anatta-log` into the message
   array shape a provider's `:build-request` expects (role + content pairs;
   `result` entries are folded into the message stream as a synthetic
@@ -160,8 +170,20 @@ pins down further.
 ### Functions
 
 - `anatta-extract-code(text)` — regex-extract the content of the first
-  ```elisp fenced block in `text`. Returns `nil` if none found (see error
-  handling).
+  ```elisp fenced block in `text` as a **string**. Returns `nil` if none
+  found (see error handling). Any prose in `text` outside that fenced block
+  (reasoning, commentary) is intentionally discarded — not logged in any
+  field. This is a deliberate minimalism choice, not an oversight: the log
+  only ever holds code and eval results, never freeform narration, so the
+  agent's future turns see exactly what happened, not what it said about
+  what happened.
+- `anatta-read-single-form(code-string)` — `read` exactly one Lisp object
+  from `code-string`, then check whether any non-whitespace text remains
+  after it. If so, this is a protocol violation (the system prompt requires
+  *exactly one* form) and the function returns an error rather than
+  silently evaluating only the first form or silently `progn`-ing every
+  form found — the model gets clear, visible feedback that it broke the
+  one-form convention instead of a silent partial-execution.
 - `anatta-step()` — one turn:
   1. `anatta-provider-request(anatta-log, anatta-system-prompt)` → raw text
      (or an error value).
@@ -170,18 +192,22 @@ pins down further.
      this turn (see error handling for the retry/stop policy).
   3. `anatta-extract-code` on the text. If `nil`: append a `(:role result
      :error "no elisp block found")` entry, persist, return.
-  4. Append `(:role assistant :code <extracted-text>)` to the log.
-  5. `condition-case`-wrapped `eval` of the extracted form. Append
+  4. `anatta-read-single-form` on the extracted string. If it reports a
+     multiple-forms violation: append a `(:role result :error "expected
+     exactly one form, got extra trailing content")` entry, persist,
+     return — no eval attempted.
+  5. Append `(:role assistant :code <extracted-text>)` to the log (the raw
+     string, for the record — read/eval operate on the parsed form).
+  6. `condition-case`-wrapped `eval` of the parsed form. Append
      `(:role result :value <printed-result>)` on success or `(:role result
      :error <error-message>)` on failure.
-  6. `anatta-log-persist()`.
+  7. `anatta-log-persist()`.
 - `anatta-run(&optional max-iter)` — calls `anatta-step` in a loop until
-  either: the evaluated form was a call to the sentinel function
-  `(anatta-done)` (which `anatta-step` detects by checking whether that
-  symbol's function cell was invoked — simplest implementation: `anatta-done`
-  sets a global flag `anatta-loop-done-p` that `anatta-run` checks after each
-  step), or `max-iter` steps have run (default: some fixed cap, e.g. 50,
-  matching gait's `max_iter` in spirit).
+  either: the agent called `(anatta-done)` during its turn — a predefined
+  function whose entire job is setting a global flag,
+  `anatta-loop-done-p`, which `anatta-run` checks after each step — or
+  `max-iter` steps have run (default: some fixed cap, e.g. 50, matching
+  gait's `max_iter` in spirit).
 
 ### Error handling
 
@@ -232,6 +258,13 @@ unattended.
 
 ## Open questions
 
+- **No context-window/token-budget management.** `anatta-log` grows every
+  step with no truncation, summarization, or windowing, capturing full
+  code+result text. A real run can exceed the target model's context
+  window well before hitting `max-iter` or `anatta-done` — this is a real
+  functional failure mode (the provider call starts failing/truncating),
+  not a cosmetic one, and v0 has no answer for it beyond "it'll eventually
+  break and show up as a provider error."
 - No distinction yet between a recoverable eval error (agent should just try
   again) and a fatal one (agent is stuck in a loop of the same failing form)
   — v0 relies on `max-iter` as the only backstop.
