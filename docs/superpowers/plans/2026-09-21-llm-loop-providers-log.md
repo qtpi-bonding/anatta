@@ -811,21 +811,52 @@ git commit -m "feat: anatta-step/anatta-run, the provider-driven eval loop"
 
 ---
 
-## Task 7: Wire it up for real — entrypoint, task seeding, manual smoke test
+## Task 7: Wire it up for real — entrypoint, CLI wrapper, interactive mode, manual smoke test
 
 **Files:**
+- Modify: `agent/anatta-loop.el` (interactive spec for `anatta-run`)
 - Modify: `entrypoint.sh`
 - Modify: `docker-compose.yml` (pass through API key env vars)
+- Create: `bin/anatta` (CLI wrapper)
 - Modify: `README.md`
 - Create: `smoke-test.sh`
 
 **Interfaces:**
 - Consumes: everything from Tasks 1–6.
-- Produces: a daemon that loads the three `.el` files and the persisted (or freshly seeded) log on startup, and a documented manual procedure for running one real turn.
+- Produces: a daemon that loads the three `.el` files and the persisted (or freshly seeded) log on startup; `anatta-run` callable both via `M-x`/`eval-expression` in any Emacs (headless daemon or a person's own interactive session) and via `emacsclient --eval`; a `bin/anatta "<task>"` CLI entrypoint; and a documented manual procedure for running one real turn.
 
-This task has no ERT tests — it's the integration step the spec's Testing Plan explicitly reserves for a manual, real-provider run ("wire in a real provider... and run one real end-to-end turn by hand before trusting `anatta-run` unattended").
+This task has no ERT tests for the entrypoint/CLI/smoke-test pieces — that's the integration surface the spec's Testing Plan explicitly reserves for a manual, real-provider run ("wire in a real provider... and run one real end-to-end turn by hand before trusting `anatta-run` unattended"). The one code change to `anatta-loop.el` (Step 1 below) doesn't change `anatta-run`'s behavior for any already-tested call shape, so Task 6's existing 15 tests are the regression check for it — no new ERT tests are added in this task.
 
-- [ ] **Step 1: Update `entrypoint.sh` to load the agent files and seed/restore the log**
+- [ ] **Step 1: Make `anatta-run` interactive, so it's callable the same way from a headless daemon or a person's own Emacs**
+
+The whole point of anatta is that the agent's own loop is just Elisp — it shouldn't only be reachable through `emacsclient --eval` in a container. Adding an `(interactive ...)` spec costs nothing for the headless/CLI path (they never trigger it) and means anyone can `(require 'anatta-loop)` in their own running Emacs, `setq anatta-agent-dir` to wherever they want the agent's workspace, and drive it by hand with `M-x anatta-run` (optionally `C-u 5 M-x anatta-run` to cap it at 5 steps), watching `anatta-log` grow in real time and eval-ing into it themselves if they want. No container required for that path — same trust model as running anything else in your own Emacs.
+
+In `agent/anatta-loop.el`, replace the existing `anatta-run` definition:
+
+```elisp
+(defun anatta-run (&optional max-iter)
+  "Call `anatta-step' in a loop until `anatta-done' is called or
+MAX-ITER steps have run (default 50). Interactively, a numeric prefix
+argument sets MAX-ITER (e.g. `C-u 5 M-x anatta-run`); with no prefix,
+or when called from code with MAX-ITER omitted, it defaults to 50.
+This is the same function whether invoked via `emacsclient --eval' in
+a headless daemon or via `M-x' in a person's own Emacs — nothing here
+assumes a particular host, only that `anatta-agent-dir' points
+somewhere writable."
+  (interactive "P")
+  (let ((max-iter (cond ((integerp max-iter) max-iter)
+                         (max-iter (prefix-numeric-value max-iter))
+                         (t 50)))
+        (n 0))
+    (setq anatta-loop-done-p nil)
+    (while (and (< n max-iter) (not anatta-loop-done-p))
+      (anatta-step)
+      (setq n (1+ n)))))
+```
+
+This is a strict extension of the existing definition — every call shape Task 6's tests use (`(anatta-run 10)`, `(anatta-run 3)`, `(anatta-run)`) hits the `(integerp max-iter)` or `(t 50)` branches exactly as before. Run the full suite to confirm no regression: `docker compose run --rm --entrypoint emacs anatta --batch -L /agent/src -l /agent/src/tests/anatta-log-tests.el -l /agent/src/tests/anatta-providers-tests.el -l /agent/src/tests/anatta-loop-tests.el -f ert-run-tests-batch-and-exit` — expect all 29 tests to still pass.
+
+- [ ] **Step 2: Update `entrypoint.sh` to load the agent files and seed/restore the log**
 
 ```sh
 #!/bin/sh
@@ -843,7 +874,7 @@ emacsclient --eval "(progn
 tail -f /dev/null
 ```
 
-- [ ] **Step 2: Pass provider API keys and the task through `docker-compose.yml`**
+- [ ] **Step 3: Pass provider API keys and the task through `docker-compose.yml`**
 
 ```yaml
 services:
@@ -859,7 +890,47 @@ services:
     # is a self-modifying process with no path back out to the host.
 ```
 
-- [ ] **Step 3: Write the manual smoke-test script**
+- [ ] **Step 4: Write the `bin/anatta` CLI wrapper**
+
+This is the "run it as a CLI" entrypoint: one command, from any terminal, that
+starts the containerized daemon if needed, runs one task through
+`anatta-run`, prints the resulting log, and exits — no Emacs UI involved.
+It's the same daemon + `emacsclient --eval` mechanism Task 7 already sets
+up; this just packages it behind a real command instead of requiring
+someone to type `docker compose` invocations by hand.
+
+```sh
+#!/bin/sh
+# anatta CLI: run one task against the agent's headless Emacs daemon,
+# print the resulting log, then exit.
+#
+# Usage: bin/anatta "<task>"
+#   ANATTA_MAX_ITER=<n>  optional, defaults to 50 (anatta-run's own default)
+set -e
+
+if [ -z "$1" ]; then
+  echo "usage: $0 \"<task>\"" >&2
+  exit 1
+fi
+
+cd "$(dirname "$0")/.."
+
+export ANATTA_TASK="$1"
+max_iter="${ANATTA_MAX_ITER:-50}"
+
+docker compose build
+docker compose up -d
+
+echo "--- running (max $max_iter steps) ---"
+docker compose exec anatta emacsclient --eval "(anatta-run $max_iter)"
+
+echo "--- log ---"
+docker compose exec anatta emacsclient --eval '(pp-to-string anatta-log)'
+
+docker compose down
+```
+
+- [ ] **Step 5: Write the manual smoke-test script, reusing `bin/anatta`**
 
 ```sh
 #!/bin/sh
@@ -867,27 +938,18 @@ services:
 # trusting anatta-run unattended. Requires ANTHROPIC_API_KEY set on the
 # host. Costs one real API call.
 set -e
+cd "$(dirname "$0")"
 
-export ANATTA_TASK="Define a function 'anatta-hello' that returns the string \"hello from anatta\", then call (anatta-done)."
-
-docker compose build
-docker compose up -d
-
-echo "--- running one turn ---"
-docker compose exec anatta emacsclient --eval '(anatta-run 1)'
-
-echo "--- log after the turn ---"
-docker compose exec anatta emacsclient --eval '(pp-to-string anatta-log)'
-
-docker compose down
+ANATTA_MAX_ITER=1 ./bin/anatta \
+  "Define a function 'anatta-hello' that returns the string \"hello from anatta\", then call (anatta-done)."
 ```
 
-- [ ] **Step 4: Run the smoke test by hand and confirm the result**
+- [ ] **Step 6: Run the smoke test by hand and confirm the result**
 
-Run: `ANTHROPIC_API_KEY=<your key> ./smoke-test.sh`
-Expected: the printed log shows an `assistant` entry with the `defun` code, followed by a `result` entry (either `:value` on success or `:error` if the model's form didn't match exactly what was asked — either is an acceptable pass for this smoke test, since the point is confirming the *pipeline* works end to end, not grading the model's one-shot compliance). Confirm by eye that no step crashed and the log file under `agent/log.el` was written and git-committed (`cd agent && git log --oneline` should show new `persist:` commits).
+Run: `ANTHROPIC_API_KEY=<your key> chmod +x bin/anatta smoke-test.sh && ./smoke-test.sh`
+Expected: the printed log shows an `assistant` entry with the `defun` code, followed by a `result` entry (either `:value` on success or `:error` if the model's form didn't match exactly what was asked — either is an acceptable pass for this smoke test, since the point is confirming the *pipeline* works end to end, not grading the model's one-shot compliance). Confirm by eye that no step crashed and the log file under `agent/log.el` was written and git-committed (`cd agent && git log --oneline` should show new `persist:` commits). Separately, confirm `bin/anatta "<some other task>"` also works standalone (not just through the smoke test wrapper).
 
-- [ ] **Step 5: Update the README's Status section**
+- [ ] **Step 7: Update the README's Status section**
 
 Replace the "No LLM loop wired up yet." line and the four spike bullet points with:
 
@@ -904,18 +966,29 @@ of whatever elisp the model returns each turn, and `anatta-persist-to`
 for durably writing a new capability. Everything else is expected to be
 elisp the agent writes for itself at runtime.
 
-Run `./smoke-test.sh` (requires `ANTHROPIC_API_KEY`) for one real,
+Two ways to run it:
+
+- **As a CLI:** `bin/anatta "<task>"` starts the containerized daemon if
+  needed, runs the task, prints the resulting log, exits. `smoke-test.sh`
+  is a thin wrapper around this for a one-shot manual real-provider check.
+- **Inside Emacs:** `(require 'anatta-loop)` in any running Emacs (headless
+  daemon or your own interactive session), `setq anatta-agent-dir` to
+  wherever you want the agent's workspace, then `M-x anatta-run` (or
+  `C-u 5 M-x anatta-run` to cap it at 5 steps) drives the loop directly —
+  watch `anatta-log` grow, eval into it yourself, no container required.
+
+Run `ANTHROPIC_API_KEY=<key> ./smoke-test.sh` for one real,
 manually-verified turn. Unit tests for each piece run without any
 network access — see `agent/tests/`.
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 cd /Users/aicoder/Documents/anatta
-chmod +x smoke-test.sh
-git add entrypoint.sh docker-compose.yml smoke-test.sh README.md
-git commit -m "feat: wire the loop into the daemon, add a manual real-provider smoke test"
+chmod +x bin/anatta smoke-test.sh
+git add agent/anatta-loop.el entrypoint.sh docker-compose.yml bin/anatta smoke-test.sh README.md
+git commit -m "feat: wire the loop into the daemon, add a CLI wrapper, make anatta-run interactive, add a manual real-provider smoke test"
 ```
 
 ---
@@ -925,5 +998,7 @@ git commit -m "feat: wire the loop into the daemon, add a manual real-provider s
 **Spec coverage:** Component 1 (Providers) → Tasks 2–3. Component 2 (Log) → Task 1. Component 3 (Loop, system prompt, error handling, `anatta-persist-to`) → Tasks 4–6. Testing plan (mock-first, then one real hand-verified turn) → Tasks 1–6 use canned/stubbed responses exclusively, Task 7 is the one real call. All five independent-review fixes (tail-append ordering, read/multi-form handling, curl temp-file payload, discarded-prose decision, `anatta-done` as a plain flag) are implemented exactly as the revised spec describes them.
 
 **Placeholder scan:** no TBD/TODO, no "add error handling"-style steps — every step has literal code. The one deliberately open item (Task 7's smoke test grading either `:value` or `:error` as a pass) is an explicit, reasoned choice, not a deferred placeholder.
+
+**Post-hoc addition (after Tasks 1–6 were implemented and committed):** Task 7 was expanded beyond the original spec/plan scope to add dual-mode operation — a `bin/anatta` CLI wrapper and an `(interactive ...)` spec on `anatta-run` so it's drivable from a person's own Emacs, not only a headless daemon. This wasn't in the original spec because it wasn't requested until after Task 6 landed. It doesn't touch the spec's three components (providers/loop/log) or contradict any of their decisions — `anatta-run`'s change is additive (every previously-tested call shape behaves identically) and the CLI wrapper is a packaging convenience over the same daemon/`emacsclient` mechanism Task 7 already specified. Evaluated against gptel as a possible provider-layer swap at the same time (see project history) — rejected: gptel is callback-only (no synchronous variant), which fights `anatta-step`'s synchronous design, and pulls in a real multi-file MELPA dependency for no net simplification over the already-tested ~230-line hand-rolled provider layer.
 
 **Type consistency:** `anatta-log` entries, `(:role STRING :content STRING)` provider messages, and the `(:ok . FORM)` / `(:error . MESSAGE)` cons convention are used identically across all tasks that touch them.
