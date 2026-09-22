@@ -153,11 +153,23 @@ ${diff_text}
 Analyze this failure and propose a safer modification. Do not repeat the change that caused it.
 EOF
 
+  # Deliberately NOT anatta-log-persist here (it does its own git commit).
+  # git checkout/git rm above already staged the revert in the index but
+  # left it uncommitted; if anatta-log-persist committed here, `git commit`
+  # commits the *entire* index, not just the file it `git add`ed -- so that
+  # commit would silently absorb the still-staged revert too, landing under
+  # a misleading "persist: log" message, and the intended outer "rollback:
+  # ..." commit below would then find nothing left to commit (confirmed by
+  # running this for real: that's exactly what happened before this
+  # comment existed). Writing the file directly, uncommitted, and letting
+  # the one explicit commit below cover everything keeps it one commit with
+  # the right message.
   container_recfile="/repo/${recfile#./}"
   if ! docker compose exec -T "$service" emacsclient --eval "(progn
     (anatta-log-append (list :role 'user :content
       (with-temp-buffer (insert-file-contents \"${container_recfile}\") (buffer-string))))
-    (anatta-log-persist))" >/dev/null; then
+    (let ((path (expand-file-name \"log.el\" anatta-agent-dir)))
+      (with-temp-file path (prin1 anatta-log (current-buffer)))))" >/dev/null; then
     echo "anatta_rollback: failed to append diagnostic log entry" >&2
     rm -f "$recfile"
     return 1
