@@ -70,7 +70,7 @@ a vector of alists suitable for `json-encode'."
         ;; duplicating them.
         :api-base "https://openrouter.ai/api/v1/chat/completions"
         :api-key-env "OPENROUTER_API_KEY"
-        :model "anthropic/claude-sonnet-4.5"
+        :model "openai/gpt-5.6-luna"
         :headers-fn #'anatta-openai-headers-fn
         :build-request #'anatta-openai-build-request
         :parse-response #'anatta-openai-parse-response))
