@@ -1,9 +1,15 @@
 #!/bin/sh
 # anatta CLI: run one task against the agent's headless Emacs daemon,
-# print the resulting log, then exit.
+# supervising it one step at a time so a self-edit that wedges the daemon
+# gets rolled back automatically instead of hanging forever. Prints the
+# resulting log, then exits.
 #
 # Usage: bin/anatta "<task>"
-#   ANATTA_MAX_ITER=<n>  optional, defaults to 50 (anatta-run's own default)
+#   ANATTA_MAX_ITER=<n>       optional, supervisor iterations (default 50)
+#   ANATTA_STEP_TIMEOUT=<n>   optional, seconds per step before treating the
+#                             daemon as wedged (default 120)
+#   ANATTA_MAX_ROLLBACKS=<n>  optional, rollbacks allowed before giving up
+#                             (default 3)
 set -e
 
 if [ -z "$1" ]; then
@@ -12,17 +18,54 @@ if [ -z "$1" ]; then
 fi
 
 cd "$(dirname "$0")/.."
+. bin/anatta-lib.sh
 
 export ANATTA_TASK="$1"
 max_iter="${ANATTA_MAX_ITER:-50}"
+step_timeout="${ANATTA_STEP_TIMEOUT:-120}"
+max_rollbacks="${ANATTA_MAX_ROLLBACKS:-3}"
 
 docker compose build
 docker compose up -d
+trap 'docker compose down >/dev/null 2>&1' EXIT
 
-echo "--- running (max $max_iter steps) ---"
-docker compose exec anatta emacsclient --eval "(anatta-run $max_iter)"
+echo "--- running (max $max_iter steps, ${step_timeout}s/step timeout) ---"
+
+ran=0
+rollback_count=0
+
+while [ "$ran" -lt "$max_iter" ]; do
+  last_good=$(git rev-parse HEAD)
+  result=$(anatta_run_step anatta "$step_timeout") || true
+  ran=$((ran + 1))
+
+  case "$result" in
+    DONE)
+      break
+      ;;
+    CONTINUE)
+      ;;
+    UNHEALTHY*)
+      reason="${result#UNHEALTHY: }"
+      if [ "$rollback_count" -ge "$max_rollbacks" ]; then
+        echo "--- giving up: $max_rollbacks rollbacks exhausted ---" >&2
+        echo "last diagnostic: $reason" >&2
+        exit 1
+      fi
+      echo "--- step failed: $reason ---" >&2
+      echo "--- rolling back to $(git rev-parse --short "$last_good") ---" >&2
+      if ! anatta_rollback "$last_good" "$reason" anatta; then
+        echo "--- rollback itself failed, stopping ---" >&2
+        exit 1
+      fi
+      rollback_count=$((rollback_count + 1))
+      ;;
+    *)
+      echo "--- unexpected result from anatta_run_step: $result ---" >&2
+      exit 1
+      ;;
+  esac
+done
 
 echo "--- log ---"
-docker compose exec anatta emacsclient --eval '(pp-to-string anatta-log)'
-
-docker compose down
+docker compose exec -T anatta emacsclient --eval '(pp-to-string anatta-log)'
