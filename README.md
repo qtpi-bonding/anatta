@@ -49,8 +49,11 @@ elisp the agent writes for itself at runtime.
 Two ways to run it:
 
 - **As a CLI:** `bin/anatta "<task>"` starts the containerized daemon if
-  needed, runs the task, prints the resulting log, exits. `smoke-test.sh`
-  is a thin wrapper around this for a one-shot manual real-provider check.
+  needed, runs the task one step at a time (each step wrapped in a timeout,
+  with automatic rollback if a step wedges the daemon — see "Open
+  questions" and `bin/anatta-lib.sh`), prints the resulting log, exits.
+  `smoke-test.sh` is a thin wrapper around this for a one-shot manual
+  real-provider check.
 - **Inside Emacs:** `(require 'anatta-loop)` in any running Emacs (headless
   daemon or your own interactive session), `setq anatta-agent-dir` to
   wherever you want the agent's workspace, then `M-x anatta-run` (or
@@ -68,6 +71,12 @@ network access — see `agent/tests/`.
   `/repo` (not just `./agent`), so `agent/`'s git commits can see `.git`,
   which lives at the repo root.
 - `bin/anatta` — the CLI entrypoint (`bin/anatta "<task>"`).
+- `bin/anatta-lib.sh` — the step-timeout and rollback functions `bin/anatta`
+  uses to recover from a self-edit that breaks the loop mechanism itself;
+  deliberately lives under `bin/`, never loaded into the Emacs image the
+  agent controls, and outside the `agent/` subtree a rollback restores.
+- `test-recovery.sh` — end-to-end check of the step-timeout/rollback path
+  against the real container; no API key needed.
 - `smoke-test.sh` — a one-shot manual real-provider check, thin wrapper
   around `bin/anatta`.
 - `agent/` — `anatta-log.el` (the conversation log), `anatta-providers.el`
@@ -80,9 +89,17 @@ network access — see `agent/tests/`.
 
 ## Open questions
 
-- Recovery path if a self-edit breaks the agent's own eval/dispatch loop
-  from the inside — current answer is external (daemon restart + git), not
-  anything defended in Elisp itself.
+- ~~Recovery path if a self-edit breaks the agent's own eval/dispatch loop
+  from the inside~~ — partially addressed: `bin/anatta` now runs the agent
+  one step at a time, each wrapped in a timeout (`bin/anatta-lib.sh`). A
+  step that never returns, or returns something malformed, triggers a
+  rollback: `agent/` is restored to the commit from before that step, the
+  daemon restarts, and one diagnostic log entry is appended describing what
+  broke and why it was reverted. This catches a wedged/corrupted loop; it
+  does not catch a self-edit that returns quickly without actually being
+  broken (e.g. one that silently stops making progress without erroring or
+  hanging) — that class is unprotected, same as before. See
+  `docs/superpowers/specs/2026-09-21-meta-harness-design.md`.
 - Deliberate "commit" boundary vs. live-editing the running image.
 - No context-window/token-budget management yet — the log grows every step
   with no truncation or summarization.
