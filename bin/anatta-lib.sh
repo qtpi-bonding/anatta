@@ -78,6 +78,28 @@ anatta_run_step() {
   esac
 }
 
+# anatta_wait_ready <service>
+# Polls until the daemon has actually finished entrypoint.sh's bootstrap
+# (require'd anatta-log.el, anatta-log loaded), not just accepting
+# connections -- a bare connectivity check would race entrypoint.sh's own
+# require/anatta-log-load still being in flight, both right after startup
+# and right after a restart. Returns 0 once ready, 1 if it never becomes
+# ready within ~30s.
+anatta_wait_ready() {
+  service="$1"
+  i=0
+  while [ "$i" -lt 30 ]; do
+    check=$(docker compose exec -T "$service" emacsclient --eval \
+      "(and (fboundp 'anatta-log-append) (boundp 'anatta-log))" 2>/dev/null) || check=""
+    if [ "$check" = "t" ]; then
+      return 0
+    fi
+    i=$((i + 1))
+    sleep 1
+  done
+  return 1
+}
+
 # anatta_rollback <last-good-sha> <reason> <service>
 # Restores agent/ to <last-good-sha>, restarts the daemon so it reloads
 # from the restored files, appends one diagnostic log entry via the
@@ -116,20 +138,7 @@ anatta_rollback() {
 
   docker compose restart "$service" >/dev/null 2>&1 || true
 
-  i=0
-  ready=0
-  while [ "$i" -lt 30 ]; do
-    check=$(docker compose exec -T "$service" emacsclient --eval \
-      "(and (fboundp 'anatta-log-append) (boundp 'anatta-log))" 2>/dev/null) || check=""
-    if [ "$check" = "t" ]; then
-      ready=1
-      break
-    fi
-    i=$((i + 1))
-    sleep 1
-  done
-
-  if [ "$ready" -ne 1 ]; then
+  if ! anatta_wait_ready "$service"; then
     echo "anatta_rollback: daemon never became ready after restart" >&2
     return 1
   fi

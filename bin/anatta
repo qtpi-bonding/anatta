@@ -29,6 +29,15 @@ docker compose build
 docker compose up -d
 trap 'docker compose down >/dev/null 2>&1' EXIT
 
+# docker compose up -d returns as soon as the container starts, not once
+# entrypoint.sh's emacs --daemon + bootstrap eval has actually finished --
+# without this wait, the first anatta_run_step call can race a daemon
+# that isn't listening yet (seen in practice: "can't find socket").
+if ! anatta_wait_ready anatta; then
+  echo "daemon never became ready after startup" >&2
+  exit 1
+fi
+
 echo "--- running (max $max_iter steps, ${step_timeout}s/step timeout) ---"
 
 ran=0
